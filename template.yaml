@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless image thumbnail processor. An S3 ObjectCreated event under
+  uploads/ triggers a Lambda function that writes a resized JPEG thumbnail
+  under thumbnails/ in the same bucket.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Globally-unique S3 bucket name for uploads/ and thumbnails/.
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.12
+
+Resources:
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ThumbnailGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/thumbnail_generator/
+      Handler: app.handler
+      Description: Resizes images uploaded under uploads/ into thumbnails under thumbnails/.
+      Policies:
+        - Statement:
+            - Sid: ReadUploads
+              Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "${ImagesBucket.Arn}/uploads/*"
+            - Sid: WriteThumbnails
+              Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "${ImagesBucket.Arn}/thumbnails/*"
+      Events:
+        ImageUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref ImagesBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/
+
+Outputs:
+  BucketName:
+    Description: The S3 bucket to upload images into (under uploads/).
+    Value: !Ref ImagesBucket
+  ThumbnailFunctionName:
+    Description: Name of the deployed Lambda function.
+    Value: !Ref ThumbnailGeneratorFunction
+  ThumbnailFunctionArn:
+    Description: ARN of the deployed Lambda function.
+    Value: !GetAtt ThumbnailGeneratorFunction.Arn
